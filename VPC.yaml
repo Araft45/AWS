@@ -119,7 +119,8 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-    NatGatewayEIP:
+   # NAT Gateway
+  NatGatewayEIP:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
@@ -243,16 +244,16 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       NetworkAclId: !Ref PublicNacl
 
-   PublicSubnetNaclAssociation2:
+  PublicSubnetNaclAssociation2:
     Type: AWS::EC2::SubnetNetworkAclAssociation
     Properties:
       SubnetId: !Ref PublicSubnet2
       NetworkAclId: !Ref PublicNacl
 
-  PublicSubnetNaclAssociation3:
+  PublicSubnetNaclAssociation3:  # Create this resource separately
     Type: AWS::EC2::SubnetNetworkAclAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet3
+      SubnetId: !Ref PublicSubnet3  # Associate with PublicSubnet3
       NetworkAclId: !Ref PublicNacl
 
   PrivateSubnetNaclAssociation1:
@@ -272,4 +273,5 @@ Resources:
     Properties:
       SubnetId: !Ref PrivateSubnet3
       NetworkAclId: !Ref PrivateNacl
+
 
