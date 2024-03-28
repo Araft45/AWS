@@ -1,0 +1,14 @@
+CREATE THE SG FOR LB allow http/htpps:80 from nay where  ipv6 as well  give the name as alb
+
+
+create security group for webserve all the traffic from load balncer allow http/htpps allow your ip to connect with security group http myip 
+
+
+create internal loabdancer for that create the security group that allow http/https from the web server 
+
+
+create the security group for privateinstance allow internal load bancer traffic for 4000 port with custom tcp allow form my ip aswell 
+
+
+create db security group at the inbound rule type select rds sql and port 3306
+

@@ -1,0 +1,279 @@
+{\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang1033{\fonttbl{\f0\fnil\fcharset0 Calibri;}}
+{\*\generator Riched20 10.0.22000}\viewkind4\uc1 
+\pard\sa200\sl276\slmult1\f0\fs22\lang9 AWSTemplateFormatVersion: '2010-09-09'\par
+Description: 'VPC with Public and Private Subnets, NAT Gateway, and Network ACLs in Mumbai (ap-south-1)'\par
+\par
+Resources:\par
+  # VPC\par
+  VPCIac:\par
+    Type: AWS::EC2::VPC\par
+    Properties:\par
+      CidrBlock: 10.0.0.0/16\par
+      EnableDnsSupport: true\par
+      EnableDnsHostnames: true\par
+\par
+  # Public Subnets (ap-south-1a)\par
+  PublicSubnet1:\par
+    Type: AWS::EC2::Subnet\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      AvailabilityZone: ap-south-1a\par
+      CidrBlock: 10.0.1.0/24\par
+      MapPublicIpOnLaunch: true\par
+      Tags:\par
+        - Key: Name\par
+          Value: PublicSubnet1\par
+        - Key: Description\par
+          Value: Public subnet in ap-south-1a\par
+\par
+  PublicSubnet2:\par
+    Type: AWS::EC2::Subnet\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      AvailabilityZone: ap-south-1a\par
+      CidrBlock: 10.0.2.0/24\par
+      MapPublicIpOnLaunch: true\par
+      Tags:\par
+        - Key: Name\par
+          Value: PublicSubnet2\par
+        - Key: Description\par
+          Value: Public subnet in ap-south-1a\par
+\par
+  PublicSubnet3:\par
+    Type: AWS::EC2::Subnet\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      AvailabilityZone: ap-south-1a\par
+      CidrBlock: 10.0.3.0/24\par
+      MapPublicIpOnLaunch: true\par
+      Tags:\par
+        - Key: Name\par
+          Value: PublicSubnet3\par
+        - Key: Description\par
+          Value: Public subnet in ap-south-1a\par
+\par
+  # Private Subnets (ap-south-1b and ap-south-1c)\par
+  PrivateSubnet1:\par
+    Type: AWS::EC2::Subnet\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      AvailabilityZone: ap-south-1b\par
+      CidrBlock: 10.0.4.0/24\par
+      Tags:\par
+        - Key: Name\par
+          Value: PrivateSubnet1\par
+        - Key: Description\par
+          Value: Private subnet in ap-south-1b\par
+\par
+  PrivateSubnet2:\par
+    Type: AWS::EC2::Subnet\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      AvailabilityZone: ap-south-1c\par
+      CidrBlock: 10.0.5.0/24\par
+      Tags:\par
+        - Key: Name\par
+          Value: PrivateSubnet2\par
+        - Key: Description\par
+          Value: Private subnet in ap-south-1c\par
+\par
+  PrivateSubnet3:\par
+    Type: AWS::EC2::Subnet\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      AvailabilityZone: ap-south-1c\par
+      CidrBlock: 10.0.6.0/24\par
+      Tags:\par
+        - Key: Name\par
+          Value: PrivateSubnet3\par
+        - Key: Description\par
+          Value: Private subnet in ap-south-1c\par
+\par
+  # Internet Gateway\par
+  InternetGateway:\par
+    Type: AWS::EC2::InternetGateway\par
+    Properties:\par
+      Tags:\par
+        - Key: Name\par
+          Value: MyInternetGateway\par
+\par
+  # Attach Gateway\par
+  AttachGateway:\par
+    Type: AWS::EC2::VPCGatewayAttachment\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      InternetGatewayId: !Ref InternetGateway\par
+\par
+  # Public Route Table\par
+  PublicRouteTable:\par
+    Type: AWS::EC2::RouteTable\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      Tags:\par
+        - Key: Name\par
+          Value: PublicRouteTable\par
+\par
+  # Public Route\par
+  PublicRoute:\par
+    Type: AWS::EC2::Route\par
+    Properties:\par
+      RouteTableId: !Ref PublicRouteTable\par
+      DestinationCidrBlock: 0.0.0.0/0\par
+      GatewayId: !Ref InternetGateway\par
+\par
+   # NAT Gateway\par
+  NatGatewayEIP:\par
+    Type: AWS::EC2::EIP\par
+    Properties:\par
+      Domain: vpc\par
+\par
+  NatGateway:\par
+    Type: AWS::EC2::NatGateway\par
+    Properties:\par
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId\par
+      SubnetId: !Ref PublicSubnet1 # Choose any of your public subnets\par
+\par
+  # Private Route Tables (one for each private subnet)\par
+  PrivateRouteTable1:\par
+    Type: AWS::EC2::RouteTable\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      Tags:\par
+        - Key: Name\par
+          Value: PrivateRouteTable1\par
+\par
+  PrivateRoute1:\par
+    Type: AWS::EC2::Route\par
+    Properties:\par
+      RouteTableId: !Ref PrivateRouteTable1\par
+      DestinationCidrBlock: 0.0.0.0/0\par
+      NatGatewayId: !Ref NatGateway\par
+\par
+  PrivateRouteTable2:\par
+    Type: AWS::EC2::RouteTable\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      Tags:\par
+        - Key: Name\par
+          Value: PrivateRouteTable2\par
+\par
+  PrivateRoute2:\par
+    Type: AWS::EC2::Route\par
+    Properties:\par
+      RouteTableId: !Ref PrivateRouteTable2\par
+      DestinationCidrBlock: 0.0.0.0/0\par
+      NatGatewayId: !Ref NatGateway\par
+\par
+  # Network ACLs\par
+  # Public NACL (allow all inbound and outbound traffic)\par
+  PublicNacl:\par
+    Type: AWS::EC2::NetworkAcl\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      Tags:\par
+        - Key: Name\par
+          Value: PublicNacl\par
+\par
+  # Inbound rules for Public NACL (adjust based on your needs)\par
+  InboundRulesPublicNacl:\par
+    Type: AWS::EC2::NetworkAclEntry\par
+    Properties:\par
+      NetworkAclId: !Ref PublicNacl\par
+      RuleNumber: 100\par
+      Protocol: -1 # Allow all protocols\par
+      PortRange:\par
+        From: 0\par
+        To: 65535\par
+      Egress: false\par
+      RuleAction: allow\par
+      CidrBlock: 0.0.0.0/0\par
+\par
+  # Outbound rules for Public NACL (adjust based on your needs)\par
+  OutboundRulesPublicNacl:\par
+    Type: AWS::EC2::NetworkAclEntry\par
+    Properties:\par
+      NetworkAclId: !Ref PublicNacl\par
+      RuleNumber: 200\par
+      Protocol: -1 # Allow all protocols\par
+      PortRange:\par
+        From: 0\par
+        To: 65535\par
+      Egress: true\par
+      RuleAction: allow\par
+      CidrBlock: 0.0.0.0/0\par
+\par
+  # Private NACL (allow outbound traffic to the internet only)\par
+  PrivateNacl:\par
+    Type: AWS::EC2::NetworkAcl\par
+    Properties:\par
+      VpcId: !Ref VPCIac\par
+      Tags:\par
+        - Key: Name\par
+          Value: PrivateNacl\par
+\par
+  # Inbound rules for Private NACL (deny all inbound traffic by default)\par
+  InboundRulesPrivateNacl:\par
+    Type: AWS::EC2::NetworkAclEntry\par
+    Properties:\par
+      NetworkAclId: !Ref PrivateNacl\par
+      RuleNumber: 100\par
+      Protocol: -1 # Deny all protocols\par
+      PortRange:\par
+        From: 0\par
+        To: 65535\par
+      Egress: false\par
+      RuleAction: deny\par
+      CidrBlock: 0.0.0.0/0\par
+\par
+  # Outbound rules for Private NACL (allow outbound traffic to the internet)\par
+  OutboundRulesPrivateNacl:\par
+    Type: AWS::EC2::NetworkAclEntry\par
+    Properties:\par
+      NetworkAclId: !Ref PrivateNacl\par
+      RuleNumber: 200\par
+      Protocol: -1 # Allow all protocols\par
+      PortRange:\par
+        From: 0\par
+        To: 65535\par
+      Egress: true\par
+      RuleAction: allow\par
+      CidrBlock: 0.0.0.0/0\par
+\par
+  # Subnet NACL Associations\par
+  PublicSubnetNaclAssociation1:\par
+    Type: AWS::EC2::SubnetNetworkAclAssociation\par
+    Properties:\par
+      SubnetId: !Ref PublicSubnet1\par
+      NetworkAclId: !Ref PublicNacl\par
+\par
+  PublicSubnetNaclAssociation2:\par
+    Type: AWS::EC2::SubnetNetworkAclAssociation\par
+    Properties:\par
+      SubnetId: !Ref PublicSubnet2\par
+      NetworkAclId: !Ref PublicNacl\par
+\par
+  PublicSubnetNaclAssociation3:  # Create this resource separately\par
+    Type: AWS::EC2::SubnetNetworkAclAssociation\par
+    Properties:\par
+      SubnetId: !Ref PublicSubnet3  # Associate with PublicSubnet3\par
+      NetworkAclId: !Ref PublicNacl\par
+\par
+  PrivateSubnetNaclAssociation1:\par
+    Type: AWS::EC2::SubnetNetworkAclAssociation\par
+    Properties:\par
+      SubnetId: !Ref PrivateSubnet1\par
+      NetworkAclId: !Ref PrivateNacl\par
+\par
+  PrivateSubnetNaclAssociation2:\par
+    Type: AWS::EC2::SubnetNetworkAclAssociation\par
+    Properties:\par
+      SubnetId: !Ref PrivateSubnet2\par
+      NetworkAclId: !Ref PrivateNacl\par
+\par
+  PrivateSubnetNaclAssociation3:\par
+    Type: AWS::EC2::SubnetNetworkAclAssociation\par
+    Properties:\par
+      SubnetId: !Ref PrivateSubnet3\par
+      NetworkAclId: !Ref PrivateNacl\par
+}
+ 

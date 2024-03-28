@@ -1,0 +1,1 @@
+loadd blancer,security group,auto scaling,ec2,rds with multi az 
