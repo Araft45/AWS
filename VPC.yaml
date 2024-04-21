@@ -263,3 +263,71 @@ Resources:
 
    
 #he problem with this code is that the subnets are associated with the main route table.  update the code to automatically associate them correctly based on public subnet and provite subnet keep only two route tables for all subnet and assocaite . Below is the corrected and updated code:
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Security Groups Configuration'
+
+Resources:
+  ExternalALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ExternalALBSecurityGroup
+      GroupDescription: Security group for external application load balancer
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+
+  WebTierSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: WebTierSecurityGroup
+      GroupDescription: Security group for public instances in the web tier
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !GetAtt ExternalALBSecurityGroup.GroupId
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+
+  InternalLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: InternalLoadBalancerSecurityGroup
+      GroupDescription: Security group for internal load balancer
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref WebTierSecurityGroup
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+
+  AppTierSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: AppTierSecurityGroup
+      GroupDescription: Security group for app tier
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref InternalLoadBalancerSecurityGroup
+          IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: DatabaseSecurityGroup
+      GroupDescription: Security group for private database instances
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref AppTierSecurityGroup
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+
+Mappings:
+  VPCIac:
+    VpcId: !GetAtt VPCIac.VpcId

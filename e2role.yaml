@@ -1,0 +1,61 @@
+Resources:
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: demowebapp-araft45
+      AccessControl: Private
+      Tags:
+        - Key: Name
+          Value: demowebapp-araft45
+  Resources:
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: demowebapp-araft45
+      AccessControl: Private
+      Tags:
+        - Key: Name
+          Value: demowebapp-araft45
+
+  DemoEC2Role:
+   Type: AWS::IAM::Role
+    Properties:
+     RoleName: demo-ec2-role
+    AssumeRolePolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+    Policies:
+      - PolicyName: AllowSSMandS3Access
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:UpdateInstanceInformation"
+                - "ssmmessages:CreateControlChannel"
+                - "ssmmessages:CreateDataChannel"
+                - "ssmmessages:OpenControlChannel"
+                - "ssmmessages:OpenDataChannel"
+              Resource: "*"
+            - Effect: Allow
+              Action: "s3:Get*"
+              Resource: !Sub "arn:aws:s3:::${MyS3Bucket}/*"
+              Condition:
+                StringLike:
+                  aws:Referer: "arn:aws:ec2:*:*:instance/*"
+      - PolicyName: AllowRDSandSSMPermissions
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "rds:DescribeDBInstances"
+                - "ssm:GetParameter"
+                - "ssm:GetParameters"
+              Resource: "*"
+
+  

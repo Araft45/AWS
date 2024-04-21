@@ -1,0 +1,48 @@
+Parameters:
+  AdminUsernameParameterName:
+    Type: String
+    Default: /aurora/db/username
+    Description: "Name of the parameter in Parameter Store containing the admin username"
+
+  AdminPasswordParameterName:
+    Type: String
+    Default: /aurora/db/password
+    Description: "Name of the parameter in Parameter Store containing the admin user password"
+
+Resources:
+  AuroraDBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-mysql
+      EngineVersion: 8.0.mysql_aurora.3.06.0
+      MasterUsername: '{{resolve:ssm:{{self:parameters.AdminUsernameParameterName}}:1}}'
+      MasterUserPassword: '{{resolve:ssm-secure:{{resolve:ssm:{{self:parameters.AdminPasswordParameterName}}:1}}}}'
+      DBClusterIdentifier: database-1
+      DBSubnetGroupName: !Ref AuroraSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+
+  AuroraDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraDBCluster
+      Engine: aurora-mysql
+      DBInstanceClass: db.r5.large 
+      AvailabilityZone: ap-south-1c  # You can specify any AZ here
+      DBSubnetGroupName: !Ref AuroraSubnetGroup
+      PubliclyAccessible: false
+
+  AuroraDBInstanceReader:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraDBCluster
+      Engine: aurora-mysql
+      DBInstanceClass: db.r5.large 
+      AvailabilityZone: ap-south-1b  # Place reader instance in a different AZ
+      DBSubnetGroupName: !Ref AuroraSubnetGroup
+      PubliclyAccessible: false
+
+Outputs:
+  AuroraDBClusterEndpoint:
+    Description: Endpoint of the Aurora DB Cluster
+    Value: !GetAtt AuroraDBCluster.Endpoint.Address

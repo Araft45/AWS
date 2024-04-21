@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'VPC with Public and Private Subnets, NAT Gateway, and Network ACLs in Mumbai (ap-south-1)'
+Description: 'VPC with Public and Private Subnets, NAT Gateway, and Network ACLs in Mumbai (ap-south-1),and Security Groups Configuration'
 
 Resources:
   # VPC
@@ -61,7 +61,7 @@ Resources:
       CidrBlock: 10.0.4.0/24
       Tags:
         - Key: Name
-          Value: PrivateSubnet2
+          Value: PrivatedbSubnet2
         - Key: Description
           Value: Private subnet in ap-south-1b
 
@@ -85,7 +85,7 @@ Resources:
       CidrBlock: 10.0.6.0/24
       Tags:
         - Key: Name
-          Value: PrivateSubnet4
+          Value: PrivatedbSubnet4
         - Key: Description
           Value: Private subnet in ap-south-1c
 
@@ -308,3 +308,110 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
+
+  ExternalALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ExternalALBSecurityGroup
+      GroupDescription: Security group for external application load balancer
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+
+  WebTierSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: WebTierSecurityGroup
+      GroupDescription: Security group for public instances in the web tier
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !GetAtt ExternalALBSecurityGroup.GroupId
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+
+  InternalLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: InternalLoadBalancerSecurityGroup
+      GroupDescription: Security group for internal load balancer
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref WebTierSecurityGroup
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+
+  AppTierSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: AppTierSecurityGroup
+      GroupDescription: Security group for app tier
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref InternalLoadBalancerSecurityGroup
+          IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: DatabaseSecurityGroup
+      GroupDescription: Security group for private database instances
+      VpcId: !Ref VPCIac
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref AppTierSecurityGroup
+          IpProtocol: tcp 
+          FromPort: 3306
+          ToPort: 3306
+
+  AuroraSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Free tier subnet group for Aurora
+      SubnetIds:
+        - !Ref PrivateSubnet2  # Subnet in AZ 1
+        - !Ref PrivateSubnet4  # Subnet in AZ 2
+      DBSubnetGroupName: FreeTierSubnetGroup
+
+  AuroraDBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-mysql
+      EngineVersion: 8.0.mysql_aurora.3.06.0
+      MasterUsername: admin
+      MasterUserPassword: Arfat4545
+      DBClusterIdentifier: database-1
+      DBSubnetGroupName: !Ref AuroraSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+
+  AuroraDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraDBCluster
+      Engine: aurora-mysql
+      DBInstanceClass: db.r5.large 
+      AvailabilityZone: ap-south-1c  # You can specify any AZ here
+      DBSubnetGroupName: !Ref AuroraSubnetGroup
+      PubliclyAccessible: false
+
+  AuroraDBInstanceReader:
+    Type: AWS::RDS::DBInstance
+    Properties:
+     DBClusterIdentifier: !Ref AuroraDBCluster
+     Engine: aurora-mysql
+     DBInstanceClass: db.r5.large 
+     AvailabilityZone: ap-south-1b  # Place reader instance in a different AZ
+     DBSubnetGroupName: !Ref AuroraSubnetGroup
+     PubliclyAccessible: false
+      
+
+Outputs:
+  AuroraDBClusterEndpoint:
+    Description: Endpoint of the Aurora DB Cluster
+    Value: !GetAtt AuroraDBCluster.Endpoint.Address
