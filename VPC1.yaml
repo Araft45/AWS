@@ -410,8 +410,95 @@ Resources:
      DBSubnetGroupName: !Ref AuroraSubnetGroup
      PubliclyAccessible: false
       
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: demowebapp-araft45
+      AccessControl: Private
+      Tags:
+        - Key: Name
+          Value: demowebapp-araft45
+  
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: demowebapp-araft45
+      AccessControl: Private
+      Tags:
+        - Key: Name
+          Value: demowebapp-araft45
 
-Outputs:
-  AuroraDBClusterEndpoint:
-    Description: Endpoint of the Aurora DB Cluster
-    Value: !GetAtt AuroraDBCluster.Endpoint.Address
+  DemoEC2Role:
+   Type: AWS::IAM::Role
+   Properties:
+     RoleName: DemoEC2Role
+     AssumeRolePolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+     Policies:
+      - PolicyName: AllowSSMandS3Access
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "ssm:UpdateInstanceInformation"
+                - "ssmmessages:CreateControlChannel"
+                - "ssmmessages:CreateDataChannel"
+                - "ssmmessages:OpenControlChannel"
+                - "ssmmessages:OpenDataChannel"
+              Resource: "*"
+            - Effect: Allow
+              Action: "s3:Get*"
+              Resource: !Sub "arn:aws:s3:::${MyS3Bucket}/*"
+              Condition:
+                StringLike:
+                  aws:Referer: "arn:aws:ec2:*:*:instance/*"
+      - PolicyName: AllowRDSandSSMPermissions
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "rds:DescribeDBInstances"
+                - "ssm:GetParameter"
+                - "ssm:GetParameters"
+              Resource: "*"
+              
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      SecurityGroupIds:
+        - !GetAtt AppTierSecurityGroup.GroupId  # Use the security group ID
+      SubnetId: !Ref PrivateSubnet1  # Use the subnet ID
+      VpcId: !Ref VPCIac  # Specify the VPC ID
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          sudo yum install mysql -y
+          sudo wget https://dev.mysql.com/get/mysql57-community-release-el7-11.noarch.rpm
+          sudo rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql
+          sudo yum install mysql57-community-release-el7-11.noarch.rpm -y
+          sudo yum install mysql -y
+          RDS_ENDPOINT=!GetAtt AuroraDBCluster.Endpoint.Address
+          DB_USERNAME=$(aws ssm get-parameter --name /aurora/db/username --query Parameter.Value --output text)
+          DB_PASSWORD=$(aws ssm get-parameter --with-decryption --name /aurora/db/password --query Parameter.Value --output text)
+          mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "CREATE DATABASE webappdb;"
+          mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "SHOW DATABASES;"
+          mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "USE webappdb; CREATE TABLE IF NOT EXISTS transactions(id INT NOT NULL AUTO_INCREMENT, amount DECIMAL(10,2), description VARCHAR(100), PRIMARY KEY(id));"
+          mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "USE webappdb; SHOW TABLES;"
+          mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "USE webappdb; INSERT INTO transactions (amount, description) VALUES ('400', 'groceries');"
+      
+      IamInstanceProfile: !Ref DemoEC2Role
+      KeyName: ''
+      ImageId: ami-001843b876406202a  # Replace with the desired AMI ID
+      Tags:
+        - Key: Name
+          Value: DemoAppEC2Instance
+
+   
