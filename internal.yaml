@@ -1,0 +1,78 @@
+  AppTierImage:
+    Type: AWS::EC2::ImageBuilderImage
+    Properties:
+      Name: apptierimage
+      Description: app tier
+      SourceImageId: !Ref MyEC2Instance
+  
+    # Target Group for instances
+  AppTierTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: aaptier
+      TargetType: instance
+      Protocol: HTTP
+      Port: 4000
+      VpcId: !Ref VPCIac
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+  # Add this section to your existing CloudFormation template
+
+  # Internal Application Load Balancer
+  InternalALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: apptier-internal-ALB
+      Scheme: internal
+      Subnets:
+        - !Ref PrivateSubnet1  # Subnet in ap-south-1b
+        - !Ref PrivateSubnet3  # Subnet in ap-south-1c
+      SecurityGroups:
+        - !Ref InternalLoadBalancerSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'  # Set idle timeout to 60 seconds
+
+  # Listener for the ALB
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTierTargetGroup
+      LoadBalancerArn: !Ref InternalALB
+      Port: 80
+      Protocol: HTTP
+
+  # Listener Rule for HTTP Traffic
+  ALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTierTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/*"
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+
+  AppTierLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+     LaunchTemplateName: apptier-launch-template
+     ImageId: !Ref AppTierImage  # Reference the AMI created by AppTierImage resource
+     InstanceType: t3.micro
+     SecurityGroupIds:
+      - !GetAtt AppTierSecurityGroup.GroupId  # Use the AppTierSecurityGroup
+     IamInstanceProfile: !Ref DemoEC2InstanceProfile
+
+
+
+
+
+

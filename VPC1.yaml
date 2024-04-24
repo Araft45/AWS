@@ -1,6 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'VPC with Public and Private Subnets, NAT Gateway, and Network ACLs in Mumbai (ap-south-1),and Security Groups Configuration'
-
+Parameters:
+  ImageId:
+    Description: Image ID for base EC2 instance.
+    Type: AWS::EC2::Image::Id
+    Default: ami-001843b876406202a
+  InstanceType:
+    Description: Instance type to launch EC2 instances.
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro]
 Resources:
   # VPC
   VPCIac:
@@ -228,10 +237,10 @@ Resources:
         From: 0
         To: 65535
       Egress: false
-      RuleAction: deny
+      RuleAction: allow
       CidrBlock: 0.0.0.0/0
+      
 
-  # Outbound rules for Private NACL (allow outbound traffic to the internet)
     # Outbound rules for Private NACL (allow outbound traffic to the internet)
   OutboundRulesPrivateNacl:
     Type: AWS::EC2::NetworkAclEntry
@@ -348,15 +357,24 @@ Resources:
   AppTierSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: AppTierSecurityGroup
-      GroupDescription: Security group for app tier
-      VpcId: !Ref VPCIac
-      SecurityGroupIngress:
-        - SourceSecurityGroupId: !Ref InternalLoadBalancerSecurityGroup
-          IpProtocol: tcp
-          FromPort: 4000
-          ToPort: 4000
-
+     GroupName: AppTierSecurityGroup
+     GroupDescription: Security group for app tier
+     VpcId: !Ref VPCIac
+     SecurityGroupIngress:
+      - SourceSecurityGroupId: !Ref InternalLoadBalancerSecurityGroup
+        IpProtocol: tcp
+        FromPort: 4000
+        ToPort: 4000
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+     SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -418,15 +436,6 @@ Resources:
       Tags:
         - Key: Name
           Value: demowebapp-araft45
-  
-  MyS3Bucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: demowebapp-araft45
-      AccessControl: Private
-      Tags:
-        - Key: Name
-          Value: demowebapp-araft45
 
   DemoEC2Role:
    Type: AWS::IAM::Role
@@ -468,7 +477,18 @@ Resources:
                 - "ssm:GetParameter"
                 - "ssm:GetParameters"
               Resource: "*"
-              
+  DemoEC2InstanceProfile:
+   Type: AWS::IAM::InstanceProfile
+   Properties:
+    Roles:
+      - !Ref DemoEC2Role
+
+  AMICreate:
+    Type: AWS::CloudFormation::WaitCondition
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+
   MyEC2Instance:
     Type: AWS::EC2::Instance
     Properties:
@@ -478,11 +498,12 @@ Resources:
       SubnetId: !Ref PrivateSubnet1  # Use the subnet ID
       VpcId: !Ref VPCIac  # Specify the VPC ID
       UserData:
-        Fn::Base64: |
+        Fn::Base64: !Sub |
           #!/bin/bash
+          sudo -su ec2-user 
           sudo yum install mysql -y
           sudo wget https://dev.mysql.com/get/mysql57-community-release-el7-11.noarch.rpm
-          sudo rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql
+          sudo rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql 
           sudo yum install mysql57-community-release-el7-11.noarch.rpm -y
           sudo yum install mysql -y
           RDS_ENDPOINT=!GetAtt AuroraDBCluster.Endpoint.Address
@@ -493,12 +514,230 @@ Resources:
           mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "USE webappdb; CREATE TABLE IF NOT EXISTS transactions(id INT NOT NULL AUTO_INCREMENT, amount DECIMAL(10,2), description VARCHAR(100), PRIMARY KEY(id));"
           mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "USE webappdb; SHOW TABLES;"
           mysql -h $RDS_ENDPOINT -u $DB_USERNAME -p$DB_PASSWORD -e "USE webappdb; INSERT INTO transactions (amount, description) VALUES ('400', 'groceries');"
-      
-      IamInstanceProfile: !Ref DemoEC2Role
-      KeyName: ''
+          sudo curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+          source ~/.bashrc
+          sudo source ~/.bashrc
+          nvm install 16
+          nvm use 16
+          npm install -g pm2
+          cd
+          ls -rlt
+          aws s3 cp s3://demowebapp-araft45/app-tier/ app-tier --recursive
+          ls -lrt
+          cd app-tier/
+          pm2 start index.js
+          pm2 startup 
+          sudo env PATH=$PATH:/home/ec2-user/.nvm/versions/node/v16.20.0/bin /home/ec2-user/.nvm/versions/node/v16.20.0/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp/home/ec2-user
+          pm2 save
+
+      IamInstanceProfile: !Ref DemoEC2InstanceProfile
       ImageId: ami-001843b876406202a  # Replace with the desired AMI ID
       Tags:
         - Key: Name
           Value: DemoAppEC2Instance
+    
 
-   
+  AMI:
+    Type: Custom::AMI
+    DependsOn: AMICreate
+    Properties:
+      ServiceToken: !GetAtt AMIFunction.Arn
+      InstanceId: !Ref Instance
+
+  AMIFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: !Sub |
+          var response = require('cfn-response');
+          var AWS = require('aws-sdk');
+          exports.handler = function(event, context) {
+            console.log("Request received:\n", JSON.stringify(event));
+            var physicalId = event.PhysicalResourceId;
+            function success(data) {
+              return response.send(event, context, response.SUCCESS, data, physicalId);
+            }
+            function failed(e) {
+              return response.send(event, context, response.FAILED, e, physicalId);
+            }
+            // Call ec2.waitFor, continuing if not finished before Lambda function timeout.
+            function wait(waiter) {
+              console.log("Waiting: ", JSON.stringify(waiter));
+              event.waiter = waiter;
+              event.PhysicalResourceId = physicalId;
+              var request = ec2.waitFor(waiter.state, waiter.params);
+              setTimeout(()=>{
+                request.abort();
+                console.log("Timeout reached, continuing function. Params:\n", JSON.stringify(event));
+                var lambda = new AWS.Lambda();
+                lambda.invoke({
+                  FunctionName: context.invokedFunctionArn,
+                  InvocationType: 'Event',
+                  Payload: JSON.stringify(event)
+                }).promise().then((data)=>context.done()).catch((err)=>context.fail(err));
+              }, context.getRemainingTimeInMillis() - 5000);
+              return request.promise().catch((err)=>
+                (err.code == 'RequestAbortedError') ?
+                  new Promise(()=>context.done()) :
+                  Promise.reject(err)
+              );
+            }
+            var ec2 = new AWS.EC2(),
+                instanceId = event.ResourceProperties.InstanceId;
+            if (event.waiter) {
+              wait(event.waiter).then((data)=>success({})).catch((err)=>failed(err));
+            } else if (event.RequestType == 'Create' || event.RequestType == 'Update') {
+              if (!instanceId) { failed('InstanceID required'); }
+              ec2.waitFor('instanceStopped', {InstanceIds: [instanceId]}).promise()
+              .then((data)=>
+                ec2.createImage({
+                  InstanceId: instanceId,
+                  Name: event.RequestId
+                }).promise()
+              ).then((data)=>
+                wait({
+                  state: 'imageAvailable',
+                  params: {ImageIds: [physicalId = data.ImageId]}
+                })
+              ).then((data)=>success({})).catch((err)=>failed(err));
+            } else if (event.RequestType == 'Delete') {
+              if (physicalId.indexOf('ami-') !== 0) { return success({});}
+              ec2.describeImages({ImageIds: [physicalId]}).promise()
+              .then((data)=>
+                (data.Images.length == 0) ? success({}) :
+                ec2.deregisterImage({ImageId: physicalId}).promise()
+              ).then((data)=>
+                ec2.describeSnapshots({Filters: [{
+                  Name: 'description',
+                  Values: ["*" + physicalId + "*"]
+                }]}).promise()
+              ).then((data)=>
+                (data.Snapshots.length === 0) ? success({}) :
+                ec2.deleteSnapshot({SnapshotId: data.Snapshots[0].SnapshotId}).promise()
+              ).then((data)=>success({})).catch((err)=>failed(err));
+            }
+          };
+      Runtime: nodejs18.x
+      Timeout: 300
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal: {Service: [lambda.amazonaws.com]}
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      Policies:
+      - PolicyName: EC2Policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+              - 'ec2:DescribeInstances'
+              - 'ec2:DescribeImages'
+              - 'ec2:CreateImage'
+              - 'ec2:DeregisterImage'
+              - 'ec2:DescribeSnapshots'
+              - 'ec2:DeleteSnapshot'
+              Resource: ['*']
+
+Outputs:
+  AMI:
+    Value: !Ref AMI 
+
+   # Target Group for instances
+  AppTierTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: aaptier
+      TargetType: instance
+      Protocol: HTTP
+      Port: 4000
+      VpcId: !Ref VPCIac
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+  # Add this section to your existing CloudFormation template
+
+  # Internal Application Load Balancer
+  InternalALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: apptier-internal-ALB
+      Scheme: internal
+      Subnets:
+        - !Ref PrivateSubnet1  # Subnet in ap-south-1b
+        - !Ref PrivateSubnet3  # Subnet in ap-south-1c
+      SecurityGroups:
+        - !Ref InternalLoadBalancerSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'  # Set idle timeout to 60 seconds
+
+  # Listener for the ALB
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTierTargetGroup
+      LoadBalancerArn: !Ref InternalALB
+      Port: 80
+      Protocol: HTTP
+
+  # Listener Rule for HTTP Traffic
+  ALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTierTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "/*"
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+
+  AppTierLaunchTemplate:
+   Type: AWS::EC2::LaunchTemplate
+   Properties:
+    LaunchTemplateName: apptier-launch-template
+    LaunchTemplateData:
+      ImageId: !Ref AppTierImage  # Reference the AMI created by AppTierImage resource
+      InstanceType: t3.micro
+      SecurityGroupIds:
+        - !GetAtt AppTierSecurityGroup.GroupId  # Use the AppTierSecurityGroup
+      IamInstanceProfile: !Ref DemoEC2InstanceProfile
+
+  AppTierAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: apptierasg
+      LaunchTemplate:
+        LaunchTemplateName: !Ref AppTierLaunchTemplate
+        Version: "1"  # Keep it default version
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet1  # Subnet in ap-south-1b
+        - !Ref PrivateSubnet3  # Subnet in ap-south-1c
+      MinSize: 2
+      MaxSize: 2
+      DesiredCapacity: 2
+      TargetGroupARNs:
+        - !Ref AppTierTargetGroup
+      Tags:
+        - Key: Name
+          Value: AppTierASG
+          PropagateAtLaunch: true
+  

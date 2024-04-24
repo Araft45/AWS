@@ -1,5 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'VPC with Public and Private Subnets, NAT Gateway, and Network ACLs in Mumbai (ap-south-1)'
+Description: 'VPC with Public and Private Subnets, NAT Gateway, and Network ACLs in Mumbai (ap-south-1),and Security Groups Configuration'
+Parameters:
+  ImageId:
+    Description: Image ID for base EC2 instance.
+    Type: AWS::EC2::Image::Id
+    Default: ami-001843b876406202a
+  InstanceType:
+    Description: Instance type to launch EC2 instances.
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro]
 
 Resources:
   # VPC
@@ -9,6 +19,9 @@ Resources:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: true
       EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC
 
   # Public Subnets (ap-south-1a)
   PublicSubnet1:
@@ -37,26 +50,13 @@ Resources:
         - Key: Description
           Value: Public subnet in ap-south-1a
 
-  PublicSubnet3:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref VPCIac
-      AvailabilityZone: ap-south-1a
-      CidrBlock: 10.0.3.0/24
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: PublicSubnet3
-        - Key: Description
-          Value: Public subnet in ap-south-1a
-
   # Private Subnets (ap-south-1b and ap-south-1c)
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPCIac
       AvailabilityZone: ap-south-1b
-      CidrBlock: 10.0.4.0/24
+      CidrBlock: 10.0.3.0/24
       Tags:
         - Key: Name
           Value: PrivateSubnet1
@@ -67,15 +67,27 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPCIac
+      AvailabilityZone: ap-south-1b
+      CidrBlock: 10.0.4.0/24
+      Tags:
+        - Key: Name
+          Value: PrivatedbSubnet2
+        - Key: Description
+          Value: Private subnet in ap-south-1b
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPCIac
       AvailabilityZone: ap-south-1c
       CidrBlock: 10.0.5.0/24
       Tags:
         - Key: Name
-          Value: PrivateSubnet2
+          Value: PrivateSubnet3
         - Key: Description
           Value: Private subnet in ap-south-1c
 
-  PrivateSubnet3:
+  PrivateSubnet4:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPCIac
@@ -83,7 +95,7 @@ Resources:
       CidrBlock: 10.0.6.0/24
       Tags:
         - Key: Name
-          Value: PrivateSubnet3
+          Value: PrivatedbSubnet4
         - Key: Description
           Value: Private subnet in ap-south-1c
 
@@ -111,32 +123,39 @@ Resources:
         - Key: Name
           Value: PublicRouteTable
 
-  # Public Route
-  PublicRoute:
+  # Public Route (Change made here)
+  PublicRoute:  # Ensure all required properties are defined
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
+      DestinationCidrBlock: 0.0.0.0/0  # Route for internet traffic
+      GatewayId: !Ref InternetGateway  # Specify the internet gateway
 
-   # NAT Gateway
+  # NAT Gateway Elastic IP
   NatGatewayEIP:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc
+      Tags:
+        - Key: Name
+          Value: MyNatGatewayEIP
 
+  # NAT Gateway
   NatGateway:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt NatGatewayEIP.AllocationId
-      SubnetId: !Ref PublicSubnet1 # Choose any of your public subnets
+      SubnetId: !Ref PublicSubnet1  # Choose any of your public subnets
+      Tags:
+        - Key: Name
+          Value: MyNatGateway
 
   # Private Route Table
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPCIac
-      Tags: 
+      Tags:
         - Key: Name
           Value: PrivateRouteTable
 
@@ -146,7 +165,7 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway
+      NatGatewayId: !Ref NatGateway  # Route traffic to NAT Gateway
 
   # Network ACLs
   # Public NACL (allow all inbound and outbound traffic)
@@ -199,12 +218,6 @@ Resources:
       SubnetId: !Ref PublicSubnet2
       NetworkAclId: !Ref PublicNacl
 
-  PublicSubnetNaclAssociation3:
-    Type: AWS::EC2::SubnetNetworkAclAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet3
-      NetworkAclId: !Ref PublicNacl
-
   # Private NACL (allow outbound traffic to the internet only)
   PrivateNacl:
     Type: AWS::EC2::NetworkAcl
@@ -224,11 +237,12 @@ Resources:
       PortRange:
         From: 0
         To: 65535
-      Egress: false
-      RuleAction: deny
+      Egress: true 
+      RuleAction: allow 
       CidrBlock: 0.0.0.0/0
+      
 
-  # Outbound rules for Private NACL (allow outbound traffic to the internet)
+    # Outbound rules for Private NACL (allow outbound traffic to the internet)
   OutboundRulesPrivateNacl:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
@@ -261,13 +275,50 @@ Resources:
       SubnetId: !Ref PrivateSubnet3
       NetworkAclId: !Ref PrivateNacl
 
-   
-#he problem with this code is that the subnets are associated with the main route table.  update the code to automatically associate them correctly based on public subnet and provite subnet keep only two route tables for all subnet and assocaite . Below is the corrected and updated code:
+  PrivateSubnetNaclAssociation4:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet4
+      NetworkAclId: !Ref PrivateNacl
 
-AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Security Groups Configuration'
+  # Private Subnet Route Table Association
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
 
-Resources:
+  PrivateSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetRouteTableAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetRouteTableAssociation4:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet4
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Public Route Table Association
+  PublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
   ExternalALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -307,15 +358,24 @@ Resources:
   AppTierSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: AppTierSecurityGroup
-      GroupDescription: Security group for app tier
-      VpcId: !Ref VPCIac
-      SecurityGroupIngress:
-        - SourceSecurityGroupId: !Ref InternalLoadBalancerSecurityGroup
-          IpProtocol: tcp
-          FromPort: 4000
-          ToPort: 4000
-
+     GroupName: AppTierSecurityGroup
+     GroupDescription: Security group for app tier
+     VpcId: !Ref VPCIac
+     SecurityGroupIngress:
+      - SourceSecurityGroupId: !Ref InternalLoadBalancerSecurityGroup
+        IpProtocol: tcp
+        FromPort: 4000
+        ToPort: 4000
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+     SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -324,10 +384,147 @@ Resources:
       VpcId: !Ref VPCIac
       SecurityGroupIngress:
         - SourceSecurityGroupId: !Ref AppTierSecurityGroup
-          IpProtocol: tcp
+          IpProtocol: tcp 
           FromPort: 3306
           ToPort: 3306
+  # Define a new IAM role for creating AMIs
+  
 
-Mappings:
-  VPCIac:
-    VpcId: !GetAtt VPCIac.VpcId
+
+  AMICreate:
+    Type: AWS::CloudFormation::WaitCondition
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !GetAtt AppTierSecurityGroup.GroupId  # Use the security group ID
+      SubnetId: !Ref PrivateSubnet1  # Use the subnet ID
+      VpcId: !Ref VPCIac  # Specify the VPC ID
+      UserData:
+        "Fn::Base64": !Sub |
+          #!/bin/bash -x
+          yum -y install mysql # provisioning example
+          /opt/aws/bin/cfn-signal \
+            -e $? \
+            --stack ${AWS::StackName} \
+            --region ${AWS::Region} \
+            --resource AMICreate
+          shutdown -h now
+  AMI:
+    Type: Custom::AMI
+    DependsOn: AMICreate
+    Properties:
+      ServiceToken: !GetAtt AMIFunction.Arn
+      InstanceId: !Ref Instance
+  AMIFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: !Sub |
+          var response = require('cfn-response');
+          var AWS = require('aws-sdk');
+          exports.handler = function(event, context) {
+            console.log("Request received:\n", JSON.stringify(event));
+            var physicalId = event.PhysicalResourceId;
+            function success(data) {
+              return response.send(event, context, response.SUCCESS, data, physicalId);
+            }
+            function failed(e) {
+              return response.send(event, context, response.FAILED, e, physicalId);
+            }
+            // Call ec2.waitFor, continuing if not finished before Lambda function timeout.
+            function wait(waiter) {
+              console.log("Waiting: ", JSON.stringify(waiter));
+              event.waiter = waiter;
+              event.PhysicalResourceId = physicalId;
+              var request = ec2.waitFor(waiter.state, waiter.params);
+              setTimeout(()=>{
+                request.abort();
+                console.log("Timeout reached, continuing function. Params:\n", JSON.stringify(event));
+                var lambda = new AWS.Lambda();
+                lambda.invoke({
+                  FunctionName: context.invokedFunctionArn,
+                  InvocationType: 'Event',
+                  Payload: JSON.stringify(event)
+                }).promise().then((data)=>context.done()).catch((err)=>context.fail(err));
+              }, context.getRemainingTimeInMillis() - 5000);
+              return request.promise().catch((err)=>
+                (err.code == 'RequestAbortedError') ?
+                  new Promise(()=>context.done()) :
+                  Promise.reject(err)
+              );
+            }
+            var ec2 = new AWS.EC2(),
+                instanceId = event.ResourceProperties.InstanceId;
+            if (event.waiter) {
+              wait(event.waiter).then((data)=>success({})).catch((err)=>failed(err));
+            } else if (event.RequestType == 'Create' || event.RequestType == 'Update') {
+              if (!instanceId) { failed('InstanceID required'); }
+              ec2.waitFor('instanceStopped', {InstanceIds: [instanceId]}).promise()
+              .then((data)=>
+                ec2.createImage({
+                  InstanceId: instanceId,
+                  Name: event.RequestId
+                }).promise()
+              ).then((data)=>
+                wait({
+                  state: 'imageAvailable',
+                  params: {ImageIds: [physicalId = data.ImageId]}
+                })
+              ).then((data)=>success({})).catch((err)=>failed(err));
+            } else if (event.RequestType == 'Delete') {
+              if (physicalId.indexOf('ami-') !== 0) { return success({});}
+              ec2.describeImages({ImageIds: [physicalId]}).promise()
+              .then((data)=>
+                (data.Images.length == 0) ? success({}) :
+                ec2.deregisterImage({ImageId: physicalId}).promise()
+              ).then((data)=>
+                ec2.describeSnapshots({Filters: [{
+                  Name: 'description',
+                  Values: ["*" + physicalId + "*"]
+                }]}).promise()
+              ).then((data)=>
+                (data.Snapshots.length === 0) ? success({}) :
+                ec2.deleteSnapshot({SnapshotId: data.Snapshots[0].SnapshotId}).promise()
+              ).then((data)=>success({})).catch((err)=>failed(err));
+            }
+          };
+      Runtime: nodejs18.x
+      Timeout: 300
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal: {Service: [lambda.amazonaws.com]}
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      Policies:
+      - PolicyName: EC2Policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+              - 'ec2:DescribeInstances'
+              - 'ec2:DescribeImages'
+              - 'ec2:CreateImage'
+              - 'ec2:DeregisterImage'
+              - 'ec2:DescribeSnapshots'
+              - 'ec2:DeleteSnapshot'
+              Resource: ['*']
+Outputs:
+  AMI:
+    Value: !Ref AMI
