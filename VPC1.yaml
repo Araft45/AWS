@@ -740,4 +740,213 @@ Outputs:
         - Key: Name
           Value: AppTierASG
           PropagateAtLaunch: true
+  DemowebserverInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !GetAtt WebTierSecurityGroup.GroupId
+      SubnetId: !Ref PublicSubnet1
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y mysql
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+          source ~/.bashrc
+          nvm install 16
+          nvm use 16
+          cd ~/
+          aws s3 cp s3://${demowebapp-araft45}/web-tier/ web-tier --recursive
+          cd ~/web-tier
+          npm install
+          npm run build
+          sudo yum install nginx 
+          sudo cd /etc/nginx/
+          sudo ls
+          sudo rm nginx.conf
+          sudo aws s3 cp s3://${demowebapp-araft45}/nginx.conf /etc/nginx/nginx.conf
+          sudo service nginx restart
+          sudo chmod -R 755 /home/ec2-user
+          sudo chkconfig nginx on
+      Tags:
+        - Key: Name
+          Value: demowebserver
+    DependsOn: DemoEC2InstanceProfile
+ 
+  AMI:
+  Type: Custom::AMI
+  DependsOn: AMICreate
+  Properties:
+    ServiceToken: !GetAtt AMIFunction.Arn
+    InstanceId: !Ref DemowebserverInstance
+
+AMIFunction:
+  Type: AWS::Lambda::Function
+  Properties:
+    Handler: index.handler
+    Role: !GetAtt LambdaExecutionRole.Arn
+    Code:
+      ZipFile: !Sub |
+        var response = require('cfn-response');
+        var AWS = require('aws-sdk');
+        exports.handler = function(event, context) {
+          console.log("Request received:\n", JSON.stringify(event));
+          var physicalId = event.PhysicalResourceId;
+          function success(data) {
+            return response.send(event, context, response.SUCCESS, data, physicalId);
+          }
+          function failed(e) {
+            return response.send(event, context, response.FAILED, e, physicalId);
+          }
+          // Call ec2.waitFor, continuing if not finished before Lambda function timeout.
+          function wait(waiter) {
+            console.log("Waiting: ", JSON.stringify(waiter));
+            event.waiter = waiter;
+            event.PhysicalResourceId = physicalId;
+            var request = ec2.waitFor(waiter.state, waiter.params);
+            setTimeout(()=>{
+              request.abort();
+              console.log("Timeout reached, continuing function. Params:\n", JSON.stringify(event));
+              var lambda = new AWS.Lambda();
+              lambda.invoke({
+                FunctionName: context.invokedFunctionArn,
+                InvocationType: 'Event',
+                Payload: JSON.stringify(event)
+              }).promise().then((data)=>context.done()).catch((err)=>context.fail(err));
+            }, context.getRemainingTimeInMillis() - 5000);
+            return request.promise().catch((err)=>
+              (err.code == 'RequestAbortedError') ?
+                new Promise(()=>context.done()) :
+                Promise.reject(err)
+            );
+          }
+          var ec2 = new AWS.EC2(),
+              instanceId = event.ResourceProperties.InstanceId;
+          if (event.waiter) {
+            wait(event.waiter).then((data)=>success({})).catch((err)=>failed(err));
+          } else if (event.RequestType == 'Create' || event.RequestType == 'Update') {
+            if (!instanceId) { failed('InstanceID required'); }
+            ec2.waitFor('instanceStopped', {InstanceIds: [instanceId]}).promise()
+            .then((data)=>
+              ec2.createImage({
+                InstanceId: instanceId,
+                Name: event.RequestId
+              }).promise()
+            ).then((data)=>
+              wait({
+                state: 'imageAvailable',
+                params: {ImageIds: [physicalId = data.ImageId]}
+              })
+            ).then((data)=>success({})).catch((err)=>failed(err));
+          } else if (event.RequestType == 'Delete') {
+            if (physicalId.indexOf('ami-') !== 0) { return success({});}
+            ec2.describeImages({ImageIds: [physicalId]}).promise()
+            .then((data)=>
+              (data.Images.length == 0) ? success({}) :
+              ec2.deregisterImage({ImageId: physicalId}).promise()
+            ).then((data)=>
+              ec2.describeSnapshots({Filters: [{
+                Name: 'description',
+                Values: ["*" + physicalId + "*"]
+              }]}).promise()
+            ).then((data)=>
+              (data.Snapshots.length === 0) ? success({}) :
+              ec2.deleteSnapshot({SnapshotId: data.Snapshots[0].SnapshotId}).promise()
+            ).then((data)=>success({})).catch((err)=>failed(err));
+          }
+        };
+    Runtime: nodejs18.x
+    Timeout: 300
+  
+
+  # Target Group for Web Tier instances
+  WebTierTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+     Name: webtier
+     TargetType: instance
+     Protocol: HTTP
+     Port: 80
+     VpcId: !Ref VPCIac
+     HealthCheckPath: /health
+     HealthCheckIntervalSeconds: 30
+     HealthCheckTimeoutSeconds: 10
+     HealthyThresholdCount: 2
+     UnhealthyThresholdCount: 2
+
+# Public Application Load Balancer
+  PublicALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+     Name: webtier-public-ALB
+     Scheme: internet-facing
+     Subnets:
+      - !Ref PublicSubnet1  # Subnet in public subnet 1
+      - !Ref PublicSubnet2  # Subnet in public subnet 2
+     SecurityGroups:
+      - !Ref ExternalALBSecurityGroup
+     LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '60'  # Set idle timeout to 60 seconds
+
+# Listener for the public ALB
+  PublicALBListener:
+   Type: AWS::ElasticLoadBalancingV2::Listener
+   Properties:
+     DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref WebTierTargetGroup
+     LoadBalancerArn: !Ref PublicALB
+     Port: 80
+     Protocol: HTTP
+
+# Listener Rule for HTTP Traffic for public ALB
+  PublicALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+     Actions:
+      - Type: forward
+        TargetGroupArn: !Ref WebTierTargetGroup
+     Conditions:
+      - Field: path-pattern
+        Values:
+          - "/*"
+     ListenerArn: !Ref PublicALBListener
+     Priority: 1
+
+# Launch Template for Web Tier
+  WebTierLaunchTemplate:
+   Type: AWS::EC2::LaunchTemplate
+   Properties:
+    LaunchTemplateName: webtier-launch-template
+    LaunchTemplateData:
+      ImageId: !Ref WebTierImage  # Reference the AMI created for the Web Tier
+      InstanceType: t3.micro
+      SecurityGroupIds:
+        - !GetAtt WebTierSecurityGroup.GroupId  # Use the WebTierSecurityGroup
+      IamInstanceProfile: !Ref DemoEC2InstanceProfile
+
+# Auto Scaling Group for Web Tier
+  WebTierAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+     AutoScalingGroupName: webtierasg
+     LaunchTemplate:
+       LaunchTemplateName: !Ref WebTierLaunchTemplate
+       Version: "1"  # Keep it default version
+     VPCZoneIdentifier:
+      - !Ref PublicSubnet1  # Subnet in public subnet 1
+      - !Ref PublicSubnet2  # Subnet in public subnet 2
+     MinSize: 2
+     MaxSize: 2
+     DesiredCapacity: 2
+     TargetGroupARNs:
+       - !Ref WebTierTargetGroup
+     Tags:
+      - Key: Name
+        Value: WebTierASG
+        PropagateAtLaunch: true
+
   

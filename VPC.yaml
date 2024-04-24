@@ -525,6 +525,92 @@ Resources:
               - 'ec2:DescribeSnapshots'
               - 'ec2:DeleteSnapshot'
               Resource: ['*']
+    
 Outputs:
   AMI:
     Value: !Ref AMI
+
+  DemowebserverInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !GetAtt AppTierSecurityGroup.GroupId
+      SubnetId: !Ref PublicSubnet1
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y mysql
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+          source ~/.bashrc
+          nvm install 16
+          nvm use 16
+          cd ~/
+          aws s3 cp s3://${BucketName}/web-tier/ web-tier --recursive
+          cd ~/web-tier
+          npm install
+          npm run build
+          sudo amazon-linux-extras install nginx1 -y
+          sudo rm /etc/nginx/nginx.conf
+          sudo aws s3 cp s3://${BucketName}/nginx.conf /etc/nginx/nginx.conf
+          sudo service nginx restart
+          sudo chmod -R 755 /home/ec2-user
+          sudo chkconfig nginx on
+      Tags:
+        - Key: Name
+          Value: demowebserver
+    DependsOn: DemoEC2InstanceProfile
+
+  DemoEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DemoEC2Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowSSMandS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "ssm:UpdateInstanceInformation"
+                  - "ssmmessages:CreateControlChannel"
+                  - "ssmmessages:CreateDataChannel"
+                  - "ssmmessages:OpenControlChannel"
+                  - "ssmmessages:OpenDataChannel"
+                Resource: "*"
+              - Effect: Allow
+                Action: "s3:Get*"
+                Resource: !Sub "arn:aws:s3:::${MyS3Bucket}/*"
+                Condition:
+                  StringLike:
+                    aws:Referer: "arn:aws:ec2:*:*:instance/*"
+        - PolicyName: AllowRDSandSSMPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "rds:DescribeDBInstances"
+                  - "ssm:GetParameter"
+                  - "ssm:GetParameters"
+                Resource: "*"
+
+  DemoEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref DemoEC2Role
+
+Outputs:
+  DemowebserverInstance:
+    Description: EC2 instance for demowebserver
+    Value: !Ref DemowebserverInstance
