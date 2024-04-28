@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudFormation Template Builder</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .custom-file-label {
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-5">CloudFormation Template Builder</h1>
+        <form id="templateForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="htmlFile">Upload HTML File:</label>
+                <div class="custom-file">
+                    <input type="file" class="custom-file-input" id="htmlFile" name="htmlFile" accept=".html">
+                    <label class="custom-file-label" for="htmlFile">Choose file</label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="cssFile">Upload CSS File:</label>
+                <div class="custom-file">
+                    <input type="file" class="custom-file-input" id="cssFile" name="cssFile" accept=".css">
+                    <label class="custom-file-label" for="cssFile">Choose file</label>
+                </div>
+            </div>
+
+            <h2>CloudFormation Resources</h2>
+            <div class="form-group">
+                <label for="instanceType">Instance Type:</label>
+                <select class="form-control" id="instanceType" name="instanceType">
+                    <option value="t2.micro">t2.micro</option>
+                    <option value="t2.small">t2.small</option>
+                    <option value="t2.medium">t2.medium</option>
+                    <!-- Add more instance types as needed -->
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="storageSize">Storage Size (GB):</label>
+                <input type="number" class="form-control" id="storageSize" name="storageSize" min="1" value="10">
+            </div>
+            <div class="form-group">
+                <label for="securityGroup">Security Group:</label>
+                <input type="text" class="form-control" id="securityGroup" name="securityGroup">
+            </div>
+
+            <!-- Additional Options -->
+            <h2>Additional Options</h2>
+            <div class="form-group">
+                <label for="vpc">VPC:</label>
+                <select class="form-control" id="vpc" name="vpc">
+                    <option value="vpc-123456">VPC 1</option>
+                    <option value="vpc-789012">VPC 2</option>
+                    <!-- Add more VPC options as needed -->
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="subnet">Subnet:</label>
+                <select class="form-control" id="subnet" name="subnet">
+                    <option value="subnet-123456">Subnet 1</option>
+                    <option value="subnet-789012">Subnet 2</option>
+                    <!-- Add more subnet options as needed -->
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="database">Database:</label>
+                <select class="form-control" id="database" name="database">
+                    <option value="db1">Database 1</option>
+                    <option value="db2">Database 2</option>
+                    <!-- Add more database options as needed -->
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="scaling">Scaling:</label>
+                <select class="form-control" id="scaling" name="scaling">
+                    <option value="auto">Automatic Scaling</option>
+                    <option value="manual">Manual Scaling</option>
+                    <!-- Add more scaling options as needed -->
+                </select>
+            </div>
+
+            <button type="button" class="btn btn-primary mt-3" onclick="buildTemplate()">Build CloudFormation Template</button>
+        </form>
+
+        <div id="status" class="mt-3"></div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+    <script src="build_Template.js" >
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get file input elements
+            var htmlFileInput = document.getElementById("htmlFile");
+            var cssFileInput = document.getElementById("cssFile");
+
+            // Update placeholder text when files are selected
+            htmlFileInput.addEventListener('change', function() {
+                var fileName = htmlFileInput.files[0].name;
+                var label = htmlFileInput.nextElementSibling;
+                label.innerText = fileName;
+            });
+
+            cssFileInput.addEventListener('change', function() {
+                var fileName = cssFileInput.files[0].name;
+                var label = cssFileInput.nextElementSibling;
+                label.innerText = fileName;
+            });
+        });
+
+
+        function buildTemplate() {
+            var htmlFile = document.getElementById("htmlFile").files[0];
+            var cssFile = document.getElementById("cssFile").files[0];
+
+            if (!htmlFile || !cssFile) {
+                document.getElementById("status").innerText = "Please upload both HTML and CSS files.";
+                return;
+            }
+
+            var instanceType = document.getElementById("instanceType").value;
+            var storageSize = document.getElementById("storageSize").value;
+            var securityGroup = document.getElementById("securityGroup").value;
+
+            var vpc = document.getElementById("vpc").value;
+            var subnet = document.getElementById("subnet").value;
+            var database = document.getElementById("database").value;
+            var scaling = document.getElementById("scaling").value;
+
+            var formData = new FormData();
+            formData.append("htmlFile", htmlFile);
+            formData.append("cssFile", cssFile);
+            formData.append("instanceType", instanceType);
+            formData.append("storageSize", storageSize);
+            formData.append("securityGroup", securityGroup);
+            formData.append("vpc", vpc);
+            formData.append("subnet", subnet);
+            formData.append("database", database);
+            formData.append("scaling", scaling);
+
+            fetch('/build-template', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("status").innerText = data.message;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById("status").innerText = "An error occurred while building the CloudFormation template.";
+            });
+        }
+    </script>
+</body>
+</html>
